@@ -16,7 +16,7 @@ EXPOSE 54663
 
 WORKDIR $BAMBOO_HOME
 
-CMD ["/entrypoint.sh", "-fg"]
+CMD ["/docker-entrypoint.sh", "-fg"]
 ENTRYPOINT ["/sbin/tini", "--"]
 
 ARG GIT_LFS_VERSION=2.2.1
