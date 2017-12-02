@@ -1,53 +1,46 @@
 FROM containerstack/openjdk:8-alpine
+MAINTAINER Remon Lam [remon@containerstack.io]
 
-# Setup useful environment variables
-ENV BAMBOO_HOME     /var/atlassian/bamboo
-ENV BAMBOO_INSTALL  /opt/atlassian/bamboo
-ENV BAMBOO_VERSION  6.2.3
+ENV RUN_USER bamboo
+ENV RUN_GROUP bamboo
 
-# Install Atlassian Bamboo and helper tools and setup initial home
-# directory structure.
-RUN set -x \
-    # && curl --silent https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash \
-    # && apt-get install --quiet --yes --no-install-recommends git-lfs \
-    # && git lfs install \
-    # && apt-get install --quiet --yes --no-install-recommends libtcnative-1 \
-    # && apt-get clean \
-    # && rm -rf /var/lib/apt/lists/* \
-    && apk add --no-cache curl xmlstarlet git openssh bash \
-    && mkdir -p               "${BAMBOO_HOME}/lib" \
-    && chmod -R 700           "${BAMBOO_HOME}" \
-    && chown -R daemon:daemon "${BAMBOO_HOME}" \
-    && mkdir -p               "${BAMBOO_INSTALL}" \
-    && curl -Ls               "https://www.atlassian.com/software/bamboo/downloads/binary/atlassian-bamboo-${BAMBOO_VERSION}.tar.gz" | tar -zx --directory  "${BAMBOO_INSTALL}" --strip-components=1 --no-same-owner \
-    && curl -Ls                "https://dev.mysql.com/get/Downloads/Connector-J/mysql-connector-java-5.1.40.tar.gz" | tar -xz --directory "${BAMBOO_INSTALL}/lib" --strip-components=1 --no-same-owner "mysql-connector-java-5.1.40/mysql-connector-java-5.1.40-bin.jar" \
-    && chmod -R 700           "${BAMBOO_INSTALL}" \
-    && chown -R daemon:daemon "${BAMBOO_INSTALL}" \
-    && sed --in-place         's/^# umask 0027$/umask 0027/g' "${BAMBOO_INSTALL}/bin/setenv.sh" \
-    && xmlstarlet             ed --inplace \
-        --delete              "Server/Service/Engine/Host/@xmlValidation" \
-        --delete              "Server/Service/Engine/Host/@xmlNamespaceAware" \
-                              "${BAMBOO_INSTALL}/conf/server.xml" \
-    && touch -d "@0"          "${BAMBOO_INSTALL}/conf/server.xml"
+# https://confluence.atlassian.com/display/BAMBOO/Locating+important+directories+and+files
+ENV BAMBOO_HOME /var/atlassian/application-data/bamboo
+ENV BAMBOO_INSTALL_DIR /opt/atlassian/bamboo
 
-# Use the default unprivileged account. This could be considered bad practice
-# on systems where multiple processes end up being executed by 'daemon' but
-# here we only ever run one process anyway.
-USER daemon:daemon
+VOLUME ["${BAMBOO_HOME}"]
 
-# Expose default HTTP and SSH ports.
-EXPOSE 8085 54663
+# Expose HTTP and ActiveMQ ports
+EXPOSE 8085
+EXPOSE 54663
 
-# Set volume mount points for installation and home directory. Changes to the
-# home directory needs to be persisted as well as parts of the installation
-# directory due to eg. logs.
-VOLUME ["/var/atlassian/bamboo","/opt/atlassian/bamboo/logs"]
+WORKDIR $BAMBOO_HOME
 
-# Set the default working directory as the Bamboo home directory.
-WORKDIR /var/atlassian/bamboo
+CMD ["/entrypoint.sh", "-fg"]
+ENTRYPOINT ["/sbin/tini", "--"]
 
-COPY "docker-entrypoint.sh" "/"
-ENTRYPOINT ["/docker-entrypoint.sh"]
+ARG GIT_LFS_VERSION=2.2.1
+ARG GIT_LFS_DOWNLOAD_URL=https://github.com/github/git-lfs/releases/download/v${GIT_LFS_VERSION}/git-lfs-linux-amd64-${GIT_LFS_VERSION}.tar.gz
 
-# Run Atlassian Bamboo as a foreground process by default.
-CMD ["/opt/atlassian/bamboo/bin/start-bamboo.sh", "-fg"]
+RUN apk update -qq \
+    && update-ca-certificates \
+    && apk add ca-certificates wget curl git openssh bash procps openssl perl ttf-dejavu tini \
+    && rm -rf /var/lib/{apt,dpkg,cache,log}/ /tmp/* /var/tmp/* \
+    && curl -L --silent ${GIT_LFS_DOWNLOAD_URL} | tar -xz --strip-components=1 -C "/usr/bin" git-lfs-${GIT_LFS_VERSION}/git-lfs \
+    && addgroup -S ${RUN_GROUP} \
+    && adduser -S -G ${RUN_GROUP} ${RUN_USER}
+
+COPY entrypoint.sh              /entrypoint.sh
+
+ARG BAMBOO_VERSION=6.2.3
+ARG DOWNLOAD_URL=https://downloads.atlassian.com/software/bamboo/downloads/atlassian-bamboo-${BAMBOO_VERSION}.tar.gz
+
+COPY . /tmp
+
+RUN mkdir -p                             ${BAMBOO_INSTALL_DIR} \
+    && curl -L --silent                  ${DOWNLOAD_URL} | tar -xz --strip-components=1 -C "$BAMBOO_INSTALL_DIR" \
+    && chown -R ${RUN_USER}:${RUN_GROUP} ${BAMBOO_INSTALL_DIR}/ \
+    && sed -i -e 's/^JVM_SUPPORT_RECOMMENDED_ARGS=""$/: \${JVM_SUPPORT_RECOMMENDED_ARGS:=""}/g' ${BAMBOO_INSTALL_DIR}/bin/setenv.sh \
+    && sed -i -e 's/^JVM_\(.*\)_MEMORY="\(.*\)"$/: \${JVM_\1_MEMORY:=\2}/g' ${BAMBOO_INSTALL_DIR}/bin/setenv.sh \
+    && sed -i -e 's/^JAVA_OPTS="/JAVA_OPTS="${JAVA_OPTS} /g' ${BAMBOO_INSTALL_DIR}/bin/setenv.sh \
+    && sed -i -e 's/port="8085"/port="8085" secure="${catalinaConnectorSecure}" scheme="${catalinaConnectorScheme}" proxyName="${catalinaConnectorProxyName}" proxyPort="${catalinaConnectorProxyPort}"/' ${BAMBOO_INSTALL_DIR}/conf/server.xml
