@@ -30,7 +30,7 @@ RUN apk update -qq \
     && addgroup -S ${RUN_GROUP} \
     && adduser -S -G ${RUN_GROUP} ${RUN_USER}
 
-COPY entrypoint.sh              /entrypoint.sh
+COPY docker-entrypoint.sh /docker-entrypoint.sh
 
 ARG BAMBOO_VERSION=6.2.3
 ARG DOWNLOAD_URL=https://downloads.atlassian.com/software/bamboo/downloads/atlassian-bamboo-${BAMBOO_VERSION}.tar.gz
