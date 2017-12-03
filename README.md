@@ -14,3 +14,5 @@ docker run \
   --publish 8085:8085 \
   --publish 54663:54663 \
   containerstack/bamboo:6.2.3
+
+ʕ•͡•ʔ
